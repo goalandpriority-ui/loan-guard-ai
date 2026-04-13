@@ -62,9 +62,11 @@ export default function App() {
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  /* 🔥 NEW: LIVE PLAY STORE DATA */
   const [liveResults, setLiveResults] = useState([]);
   const [liveLoading, setLiveLoading] = useState(false);
+
+  /* 🔥 NEW: STORE AI RISKS */
+  const [liveRisks, setLiveRisks] = useState({});
 
   useEffect(() => {
     fetchApps();
@@ -82,7 +84,7 @@ export default function App() {
     setLoading(false);
   }
 
-  /* 🔥 NEW: FETCH LIVE PLAY STORE */
+  /* 🔥 FETCH LIVE APPS */
   async function fetchLiveApps() {
     if (!query) return;
 
@@ -93,10 +95,40 @@ export default function App() {
       );
       const data = await res.json();
       setLiveResults(data || []);
+
+      // 🔥 AUTO FETCH REVIEWS + AI
+      runAIForApps(data || []);
     } catch (e) {
       console.log("Live API error", e);
     }
     setLiveLoading(false);
+  }
+
+  /* 🔥 FETCH REVIEWS */
+  async function fetchReviews(appId) {
+    try {
+      const res = await fetch(
+        "https://loan-guard-backend.onrender.com/reviews?appId=" + appId
+      );
+      const data = await res.json();
+      return data || [];
+    } catch (e) {
+      console.log("Review error", e);
+      return [];
+    }
+  }
+
+  /* 🤖 RUN AI FOR ALL LIVE APPS */
+  async function runAIForApps(appList) {
+    const riskMap = {};
+
+    for (let app of appList) {
+      const reviews = await fetchReviews(app.appId);
+      const risk = analyzeReviews(reviews);
+      riskMap[app.appId] = risk;
+    }
+
+    setLiveRisks(riskMap);
   }
 
   const searchResult = apps.find(a =>
@@ -147,7 +179,6 @@ export default function App() {
             }}
           />
 
-          {/* 🔥 UPDATED BUTTON */}
           <TouchableOpacity
             onPress={async () => {
               await fetchLiveApps();
@@ -220,25 +251,40 @@ export default function App() {
           {liveLoading ? (
             <ActivityIndicator color="#22c55e" />
           ) : (
-            liveResults.map((app, i) => (
-              <View
-                key={i}
-                style={{
-                  backgroundColor: "#111",
-                  padding: 15,
-                  marginTop: 10,
-                  borderRadius: 10
-                }}
-              >
-                <Text style={{ color: "#fff", fontSize: 16 }}>
-                  {app.title}
-                </Text>
+            liveResults.map((app, i) => {
+              const risk = liveRisks[app.appId] || "loading";
 
-                <Text style={{ color: "#aaa" }}>
-                  ⭐ {app.score}
-                </Text>
-              </View>
-            ))
+              return (
+                <View
+                  key={i}
+                  style={{
+                    backgroundColor: "#111",
+                    padding: 15,
+                    marginTop: 10,
+                    borderRadius: 10
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontSize: 16 }}>
+                    {app.title}
+                  </Text>
+
+                  <Text style={{ color: "#aaa" }}>
+                    ⭐ {app.score}
+                  </Text>
+
+                  <Text
+                    style={{
+                      color: risk === "loading" ? "#aaa" : getRiskColor(risk),
+                      marginTop: 5
+                    }}
+                  >
+                    {risk === "loading"
+                      ? "Analyzing..."
+                      : `AI Risk: ${risk.toUpperCase()}`}
+                  </Text>
+                </View>
+              );
+            })
           )}
 
           {!searchResult && liveResults.length === 0 && (
@@ -344,4 +390,4 @@ export default function App() {
       )}
     </View>
   );
-              }
+}
