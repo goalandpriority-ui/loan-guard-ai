@@ -6,14 +6,15 @@ import {
   TouchableOpacity,
   ScrollView,
   Linking,
-  ActivityIndicator
+  ActivityIndicator,
+  Alert
 } from "react-native";
 import { createClient } from "@supabase/supabase-js";
 
 /* 🔥 SUPABASE CONFIG */
 const supabase = createClient(
   "https://ytvjjvqxsuljnkxveukh.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl0dmpqdnF4c3Vsam5reHZldWtoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE5OTc4NTQsImV4cCI6MjA4NzU3Mzg1NH0.YhZ2VMmly6mD6kniedpUofF-vdxhj3paEllFMuDNjf4"
+  "YOUR_ANON_KEY"
 );
 
 /* 🤖 AI REVIEW ANALYZER */
@@ -21,41 +22,39 @@ function analyzeReviews(reviews = []) {
   let score = 0;
 
   const dangerWords = [
-    "harassment",
-    "blackmail",
-    "threat",
-    "abuse",
-    "contact",
-    "call",
-    "pressure",
-    "7 days",
-    "7 day",
-    "seven days",
-    "weekly loan",
-    "short term loan"
+    "harassment","blackmail","threat","abuse",
+    "contact","call","pressure",
+    "7 days","7 day","seven days",
+    "weekly loan","short term loan"
   ];
 
   reviews.forEach(r => {
     const text = (r || "").toLowerCase();
-
     dangerWords.forEach(word => {
       if (text.includes(word)) score++;
     });
   });
 
-  const has7Day = reviews.some(r =>
-    (r || "").toLowerCase().includes("7 day") ||
-    (r || "").toLowerCase().includes("7 days")
-  );
-
-  if (has7Day) score += 2;
+  if (reviews.some(r => (r || "").includes("7 day"))) score += 2;
 
   if (score >= 4) return "high";
   if (score >= 2) return "medium";
   return "low";
 }
 
+/* 🧠 REASON FUNCTION */
+function getScamReason(reviews = []) {
+  const text = reviews.join(" ").toLowerCase();
+
+  if (text.includes("7 day")) return "7-day loan trap detected";
+  if (text.includes("harassment")) return "Harassment complaints";
+  if (text.includes("blackmail")) return "Blackmail risk";
+
+  return "Multiple complaints detected";
+}
+
 export default function App() {
+
   const [screen, setScreen] = useState("home");
   const [query, setQuery] = useState("");
   const [score, setScore] = useState("");
@@ -64,9 +63,12 @@ export default function App() {
 
   const [liveResults, setLiveResults] = useState([]);
   const [liveLoading, setLiveLoading] = useState(false);
-
-  /* 🔥 NEW: STORE AI RISKS */
   const [liveRisks, setLiveRisks] = useState({});
+  const [liveReviews, setLiveReviews] = useState({});
+
+  /* 🚨 REPORT STATE */
+  const [selectedApp, setSelectedApp] = useState(null);
+  const [reportText, setReportText] = useState("");
 
   useEffect(() => {
     fetchApps();
@@ -74,61 +76,68 @@ export default function App() {
 
   async function fetchApps() {
     setLoading(true);
-    const { data, error } = await supabase.from("apps").select("*");
-
-    if (error) {
-      console.log("ERROR:", error);
-    } else {
-      setApps(data || []);
-    }
+    const { data } = await supabase.from("apps").select("*");
+    setApps(data || []);
     setLoading(false);
   }
 
-  /* 🔥 FETCH LIVE APPS */
   async function fetchLiveApps() {
     if (!query) return;
 
     setLiveLoading(true);
-    try {
-      const res = await fetch(
-        "https://loan-guard-backend.onrender.com/search?q=" + query
-      );
-      const data = await res.json();
-      setLiveResults(data || []);
 
-      // 🔥 AUTO FETCH REVIEWS + AI
-      runAIForApps(data || []);
-    } catch (e) {
-      console.log("Live API error", e);
-    }
+    const res = await fetch(
+      "https://loan-guard-backend.onrender.com/search?q=" + query
+    );
+    const data = await res.json();
+
+    setLiveResults(data || []);
+    runAIForApps(data || []);
+
     setLiveLoading(false);
   }
 
-  /* 🔥 FETCH REVIEWS */
   async function fetchReviews(appId) {
-    try {
-      const res = await fetch(
-        "https://loan-guard-backend.onrender.com/reviews?appId=" + appId
-      );
-      const data = await res.json();
-      return data || [];
-    } catch (e) {
-      console.log("Review error", e);
-      return [];
-    }
+    const res = await fetch(
+      "https://loan-guard-backend.onrender.com/reviews?appId=" + appId
+    );
+    return await res.json();
   }
 
-  /* 🤖 RUN AI FOR ALL LIVE APPS */
   async function runAIForApps(appList) {
     const riskMap = {};
+    const reviewMap = {};
 
     for (let app of appList) {
       const reviews = await fetchReviews(app.appId);
-      const risk = analyzeReviews(reviews);
-      riskMap[app.appId] = risk;
+      reviewMap[app.appId] = reviews;
+      riskMap[app.appId] = analyzeReviews(reviews);
     }
 
     setLiveRisks(riskMap);
+    setLiveReviews(reviewMap);
+  }
+
+  function getRiskColor(risk) {
+    if (risk === "high") return "#ef4444";
+    if (risk === "medium") return "#facc15";
+    return "#22c55e";
+  }
+
+  /* 🚨 SUBMIT REPORT */
+  async function submitReport() {
+    if (!reportText) return;
+
+    await supabase.from("reports").insert([
+      {
+        app_name: selectedApp.title,
+        report: reportText
+      }
+    ]);
+
+    Alert.alert("Report submitted 🚀");
+    setReportText("");
+    setScreen("result");
   }
 
   const searchResult = apps.find(a =>
@@ -138,12 +147,6 @@ export default function App() {
   const eligibleApps = apps.filter(a =>
     a.min_score <= Number(score) && a.risk === "low"
   );
-
-  function getRiskColor(risk) {
-    if (risk === "high") return "#ef4444";
-    if (risk === "medium") return "#facc15";
-    return "#22c55e";
-  }
 
   const aiRisk = analyzeReviews(searchResult?.reviews || []);
 
@@ -216,178 +219,116 @@ export default function App() {
       {screen === "result" && (
         <ScrollView>
 
-          {/* 🔥 DB RESULT */}
           {searchResult && (
             <>
               <Text style={{ color: "#fff", fontSize: 22 }}>
                 {searchResult.name}
               </Text>
-
-              <Text style={{ color: "#aaa", marginTop: 5 }}>
-                DB Risk: {searchResult.risk.toUpperCase()}
-              </Text>
-
-              <Text
-                style={{
-                  color: getRiskColor(aiRisk),
-                  marginTop: 10,
-                  fontSize: 18
-                }}
-              >
-                AI Risk: {aiRisk.toUpperCase()}
-              </Text>
-
-              <Text style={{ color: "#aaa", marginTop: 10 }}>
-                ⭐ {searchResult.rating}
-              </Text>
             </>
           )}
 
-          {/* 🔥 LIVE RESULTS */}
           <Text style={{ color: "#22c55e", marginTop: 20 }}>
             🔴 Live Play Store Results
           </Text>
 
-          {liveLoading ? (
-            <ActivityIndicator color="#22c55e" />
-          ) : (
-            liveResults.map((app, i) => {
-              const risk = liveRisks[app.appId] || "loading";
+          {liveResults.map((app, i) => {
+            const risk = liveRisks[app.appId] || "loading";
+            const reviews = liveReviews[app.appId] || [];
 
-              return (
-                <View
-                  key={i}
+            return (
+              <View key={i} style={{
+                backgroundColor:"#111",
+                padding:15,
+                marginTop:10,
+                borderRadius:10
+              }}>
+
+                <Text style={{ color:"#fff" }}>{app.title}</Text>
+                <Text style={{ color:"#aaa" }}>⭐ {app.score}</Text>
+
+                <Text style={{ color:getRiskColor(risk) }}>
+                  {risk==="loading"?"Analyzing...":risk.toUpperCase()}
+                </Text>
+
+                {/* 🚨 SCAM ALERT */}
+                {risk==="high" && (
+                  <View style={{ marginTop:10 }}>
+                    <Text style={{ color:"#ef4444",fontWeight:"bold" }}>
+                      🚨 SCAM ALERT
+                    </Text>
+                    <Text style={{ color:"#fca5a5" }}>
+                      {getScamReason(reviews)}
+                    </Text>
+                  </View>
+                )}
+
+                {/* REPORT BUTTON */}
+                <TouchableOpacity
+                  onPress={()=>{
+                    setSelectedApp(app);
+                    setScreen("report");
+                  }}
                   style={{
-                    backgroundColor: "#111",
-                    padding: 15,
-                    marginTop: 10,
-                    borderRadius: 10
+                    backgroundColor:"#ef4444",
+                    padding:10,
+                    marginTop:10,
+                    borderRadius:8
                   }}
                 >
-                  <Text style={{ color: "#fff", fontSize: 16 }}>
-                    {app.title}
-                  </Text>
+                  <Text style={{ color:"#fff" }}>Report App</Text>
+                </TouchableOpacity>
 
-                  <Text style={{ color: "#aaa" }}>
-                    ⭐ {app.score}
-                  </Text>
+              </View>
+            );
+          })}
 
-                  <Text
-                    style={{
-                      color: risk === "loading" ? "#aaa" : getRiskColor(risk),
-                      marginTop: 5
-                    }}
-                  >
-                    {risk === "loading"
-                      ? "Analyzing..."
-                      : `AI Risk: ${risk.toUpperCase()}`}
-                  </Text>
-                </View>
-              );
-            })
-          )}
-
-          {!searchResult && liveResults.length === 0 && (
-            <Text style={{ color: "#fff", marginTop: 20 }}>
-              No app found 😅
-            </Text>
-          )}
-
-          <TouchableOpacity onPress={() => setScreen("home")}>
-            <Text style={{ color: "#22c55e", marginTop: 20 }}>← Back</Text>
+          <TouchableOpacity onPress={()=>setScreen("home")}>
+            <Text style={{ color:"#22c55e",marginTop:20 }}>← Back</Text>
           </TouchableOpacity>
 
         </ScrollView>
       )}
 
-      {/* 💳 CREDIT */}
-      {screen === "credit" && (
+      {/* 🚨 REPORT SCREEN */}
+      {screen==="report" && (
         <>
-          <Text style={{ color: "#fff", fontSize: 22 }}>
-            Enter Credit Score
+          <Text style={{ color:"#fff",fontSize:22 }}>
+            Report {selectedApp?.title}
           </Text>
 
           <TextInput
-            placeholder="e.g. 760"
-            placeholderTextColor="#888"
-            keyboardType="numeric"
-            value={score}
-            onChangeText={setScore}
+            placeholder="Explain issue..."
+            value={reportText}
+            onChangeText={setReportText}
             style={{
-              backgroundColor: "#111",
-              color: "#fff",
-              padding: 15,
-              marginTop: 20,
-              borderRadius: 10
+              backgroundColor:"#111",
+              color:"#fff",
+              padding:15,
+              marginTop:20,
+              borderRadius:10
             }}
           />
 
           <TouchableOpacity
-            onPress={() => setScreen("creditResult")}
+            onPress={submitReport}
             style={{
-              backgroundColor: "#22c55e",
-              padding: 15,
-              marginTop: 10,
-              borderRadius: 10
+              backgroundColor:"#ef4444",
+              padding:15,
+              marginTop:10,
+              borderRadius:10
             }}
           >
-            <Text style={{ textAlign: "center" }}>
-              See Safe Loan Options
+            <Text style={{ color:"#fff",textAlign:"center" }}>
+              Submit Report
             </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={()=>setScreen("result")}>
+            <Text style={{ color:"#22c55e",marginTop:20 }}>← Back</Text>
           </TouchableOpacity>
         </>
       )}
 
-      {/* 💳 CREDIT RESULT */}
-      {screen === "creditResult" && (
-        <ScrollView>
-          <Text style={{ color: "#fff", fontSize: 22 }}>
-            Your Score: {score}
-          </Text>
-
-          {eligibleApps.map((app, i) => (
-            <View
-              key={i}
-              style={{
-                backgroundColor: "#111",
-                padding: 15,
-                marginTop: 10,
-                borderRadius: 10
-              }}
-            >
-              <Text style={{ color: "#fff", fontSize: 18 }}>
-                {app.name}
-              </Text>
-
-              <Text style={{ color: "#aaa" }}>
-                ⭐ {app.rating}
-              </Text>
-
-              <Text style={{ color: "#22c55e", marginTop: 5 }}>
-                ✅ Eligible for your score
-              </Text>
-
-              <TouchableOpacity
-                onPress={() => Linking.openURL(app.link)}
-                style={{
-                  backgroundColor: "#22c55e",
-                  padding: 10,
-                  marginTop: 10,
-                  borderRadius: 8
-                }}
-              >
-                <Text style={{ textAlign: "center" }}>
-                  Apply Loan
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-
-          <TouchableOpacity onPress={() => setScreen("home")}>
-            <Text style={{ color: "#22c55e", marginTop: 20 }}>← Back</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      )}
     </View>
   );
-}
+                    }
