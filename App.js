@@ -62,6 +62,10 @@ export default function App() {
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  /* 🔥 NEW: LIVE PLAY STORE DATA */
+  const [liveResults, setLiveResults] = useState([]);
+  const [liveLoading, setLiveLoading] = useState(false);
+
   useEffect(() => {
     fetchApps();
   }, []);
@@ -78,6 +82,23 @@ export default function App() {
     setLoading(false);
   }
 
+  /* 🔥 NEW: FETCH LIVE PLAY STORE */
+  async function fetchLiveApps() {
+    if (!query) return;
+
+    setLiveLoading(true);
+    try {
+      const res = await fetch(
+        "https://loan-guard-backend.onrender.com/search?q=" + query
+      );
+      const data = await res.json();
+      setLiveResults(data || []);
+    } catch (e) {
+      console.log("Live API error", e);
+    }
+    setLiveLoading(false);
+  }
+
   const searchResult = apps.find(a =>
     a.name.toLowerCase().includes(query.toLowerCase())
   );
@@ -92,7 +113,6 @@ export default function App() {
     return "#22c55e";
   }
 
-  /* 🔥 AI RISK */
   const aiRisk = analyzeReviews(searchResult?.reviews || []);
 
   return (
@@ -127,8 +147,12 @@ export default function App() {
             }}
           />
 
+          {/* 🔥 UPDATED BUTTON */}
           <TouchableOpacity
-            onPress={() => setScreen("result")}
+            onPress={async () => {
+              await fetchLiveApps();
+              setScreen("result");
+            }}
             style={{
               backgroundColor: "#22c55e",
               padding: 15,
@@ -137,7 +161,7 @@ export default function App() {
             }}
           >
             <Text style={{ textAlign: "center", fontWeight: "bold" }}>
-              Check App
+              Check App (Live + AI)
             </Text>
           </TouchableOpacity>
 
@@ -159,19 +183,19 @@ export default function App() {
 
       {/* 🔎 RESULT */}
       {screen === "result" && (
-        <>
-          {searchResult ? (
+        <ScrollView>
+
+          {/* 🔥 DB RESULT */}
+          {searchResult && (
             <>
               <Text style={{ color: "#fff", fontSize: 22 }}>
                 {searchResult.name}
               </Text>
 
-              {/* 🔴 ORIGINAL RISK */}
               <Text style={{ color: "#aaa", marginTop: 5 }}>
                 DB Risk: {searchResult.risk.toUpperCase()}
               </Text>
 
-              {/* 🤖 AI RISK */}
               <Text
                 style={{
                   color: getRiskColor(aiRisk),
@@ -185,41 +209,39 @@ export default function App() {
               <Text style={{ color: "#aaa", marginTop: 10 }}>
                 ⭐ {searchResult.rating}
               </Text>
+            </>
+          )}
 
-              {/* 🧠 SMART WARNINGS */}
-              {aiRisk === "high" && (
-                <Text style={{ color: "#ef4444", marginTop: 10 }}>
-                  ⚠️ High risk detected (AI) – possible harassment / 7-day trap
-                </Text>
-              )}
+          {/* 🔥 LIVE RESULTS */}
+          <Text style={{ color: "#22c55e", marginTop: 20 }}>
+            🔴 Live Play Store Results
+          </Text>
 
-              {aiRisk === "medium" && (
-                <Text style={{ color: "#facc15", marginTop: 10 }}>
-                  ⚠️ Some risky patterns found
-                </Text>
-              )}
-
-              {aiRisk === "low" && (
-                <Text style={{ color: "#22c55e", marginTop: 10 }}>
-                  ✅ Looks safe based on reviews
-                </Text>
-              )}
-
-              <TouchableOpacity
-                onPress={() => Linking.openURL(searchResult.link)}
+          {liveLoading ? (
+            <ActivityIndicator color="#22c55e" />
+          ) : (
+            liveResults.map((app, i) => (
+              <View
+                key={i}
                 style={{
-                  backgroundColor: "#22c55e",
-                  padding: 12,
-                  marginTop: 15,
-                  borderRadius: 8
+                  backgroundColor: "#111",
+                  padding: 15,
+                  marginTop: 10,
+                  borderRadius: 10
                 }}
               >
-                <Text style={{ textAlign: "center", fontWeight: "bold" }}>
-                  Open App
+                <Text style={{ color: "#fff", fontSize: 16 }}>
+                  {app.title}
                 </Text>
-              </TouchableOpacity>
-            </>
-          ) : (
+
+                <Text style={{ color: "#aaa" }}>
+                  ⭐ {app.score}
+                </Text>
+              </View>
+            ))
+          )}
+
+          {!searchResult && liveResults.length === 0 && (
             <Text style={{ color: "#fff", marginTop: 20 }}>
               No app found 😅
             </Text>
@@ -228,7 +250,8 @@ export default function App() {
           <TouchableOpacity onPress={() => setScreen("home")}>
             <Text style={{ color: "#22c55e", marginTop: 20 }}>← Back</Text>
           </TouchableOpacity>
-        </>
+
+        </ScrollView>
       )}
 
       {/* 💳 CREDIT */}
@@ -321,4 +344,4 @@ export default function App() {
       )}
     </View>
   );
-}
+              }
